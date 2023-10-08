@@ -1,0 +1,7 @@
+.venv
+*.dat
+*.xyz
+*.wav
+*.sh
+*.clean
+psi4conda/
