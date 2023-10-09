@@ -1,7 +1,8 @@
+import os
 import sys
 
 sys.path.append(
-    "/Users/uzbit/Documents/projects/soundmol/psi4conda/lib/python3.10/site-packages"
+    f"{os.environ['PSI4']}/lib/python3.10/site-packages"
 )
 import psi4
 from rdkit import Chem
@@ -12,14 +13,50 @@ import threading
 import soundfile as sf
 
 
-def get_freq_info(scf_wfn):
-    frequencies = scf_wfn.frequencies().to_array()
+def compute_geom_from_smiles(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
+    AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+
+    # Convert RDKit molecule to XYZ format
+    xyz = Chem.MolToXYZBlock(mol)
+    print("Molecule starting geometry:")
+    print(xyz)
+
+    psi4.set_num_threads(10)
+    # psi4.set_options({'temperature': 300}) # Degrees K
+    mol = psi4.geometry(xyz)
+    return mol
+
+
+def optimize_geom(basis, mol):
+    # "scf/cc-pvdz" is more expensive/accurate basis
+    print("Optimizing geometry...")
+    psi4.optimize(basis, molecule=mol)
+    optimized_geometry = mol.to_string(dtype="xyz")
+    print("Optimized geometry:")
+    print(optimized_geometry)
+    with open("mol.xyz", "w") as fh:
+        fh.write(optimized_geometry)
+    return mol
+
+
+def get_freq_info(wfn):
+    frequencies = wfn.frequencies().to_array()
     # Print the vibrational frequencies and their modes
     for i, freq in enumerate(frequencies):
         print(f"Frequency: {freq:.2f} cm^-1")
         print(f"Mode {i+1}:")
         print()
     return frequencies
+
+
+def compute_freqs(basis, mol):
+    print("Computing normal modes...")
+    scf_e, scf_wfn = psi4.frequency(basis, molecule=mol, return_wfn=True)
+    freqs = get_freq_info(scf_wfn)
+    return freqs
+    # Get optimized geometry
 
 
 def add_tone(signal, frequency, duration=10.0, amplitude=0.5, sample_rate=44100):
@@ -42,7 +79,6 @@ def save_sound(file, signal, sample_rate=44100):
 
 
 def play_tone(frequency, duration=10.0, amplitude=0.5, sample_rate=44100):
-    """Generate a tone of a given frequency and play it."""
     t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
     signal = amplitude * np.sin(2 * np.pi * frequency * t)
     sd.play(signal, samplerate=sample_rate)
@@ -59,50 +95,70 @@ def play_freqs(freqs):
         thread.join()
 
 
-smiles = "CN(C)CCC1=CNC2=C1C(=CC=C2)OP(=O)(O)O"
-mol = Chem.MolFromSmiles(smiles)
-mol = Chem.AddHs(mol)
-AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+def compute_sound(freqs):
+    sound = np.array([])
+    for freq in freqs:
+        sound = add_tone(sound, freq, amplitude=10.0 / freq)
+    return sound
 
-# Convert RDKit molecule to XYZ format
-xyz = Chem.MolToXYZBlock(mol)
-print("Molecule starting geometry:")
-print(xyz)
 
-psi4.set_num_threads(10)
-# psi4.set_options({'temperature': 300}) # Degrees K
-mol = psi4.geometry(xyz)
+def main(freqs):
+    psi4.set_options({"reference": "rhf"})
 
-# Define your molecule here.
-# Ge -0.500000   0.000000   0.000000
-# mol = psi4.geometry(
-#     """
-# 0 1
-# Si  0.000000  -0.667578  -2.124659
-# Ge   0.000000   0.667578  -2.124659
+    # Compute new optimized geometry and normal mode freqs
+    if not freqs:
+        # Can define your molecule here.
+        mol = psi4.geometry(
+            """
+        0 1
+        Si  0.000000  -0.667578  -2.124659
+        Ge   0.000000   0.667578  -2.124659
+        H   0.923621  -1.232253  -2.126185
+        H  -0.923621  -1.232253  -2.126185
+        H  -0.923621   1.232253  -2.126185
+        H   0.923621   1.232253  -2.126185
+        """
+        )
 
-# H   0.923621  -1.232253  -2.126185
-# H  -0.923621  -1.232253  -2.126185
-# H  -0.923621   1.232253  -2.126185
-# H   0.923621   1.232253  -2.126185
-# """
-# )
+        # Or in smiles format for molecular descriptions.
+        # smiles = "CN(C)CCC1=CNC2=C1C(=CC=C2)OP(=O)(O)O"
+        # mol = compute_geom_from_smiles(smiles)
 
-psi4.set_options({"reference": "rhf"})
-psi4.optimize("scf/cc-pvdz", molecule=mol)
-optimized_geometry = mol.to_string(dtype="xyz")
-print("Optimized geometry:")
-print(optimized_geometry)
-with open("mol.xyz", "w") as fh:
-    fh.write(optimized_geometry)
+        basis = "scf/6-31G*"
+        mol = optimize_geom(basis, mol)
+        freqs = compute_freqs(basis, mol)
 
-scf_e, scf_wfn = psi4.frequency("scf/cc-pvdz", molecule=mol, return_wfn=True)
-# Get optimized geometry
-freqs = get_freq_info(scf_wfn)
-# play_freqs(freqs)
-sound = np.array([])
-for freq in freqs:
-    sound = add_tone(sound, freq)
-play_sound(sound)
-print("Saving sound and geometry to mol.wav, mol.xyz respectively...")
-save_sound("mol.wav", sound)
+    sound = compute_sound(freqs)
+    play_sound(sound)
+
+
+if __name__ == "__main__":
+    # fmt: off
+    freqs = [float(x) for x in 
+        # This list is from line "post-proj  all modes:" in previous a optimization/freq calc
+        # useful for not repeating the full optimized geom and freq calcs
+        [ 
+        '24.9650', '26.9743', '38.8128', '54.8156', '63.8747', '98.5076', '128.6125', '170.3233',
+        '178.7650', '189.7175', '207.5222', '237.4644', '242.1500', '263.1299',
+        '264.2467', '283.4913', '297.8675', '333.2050', '349.4775', '405.1296',
+        '411.1513', '437.9763', '448.1684', '460.7197', '486.3579', '498.6746',
+        '519.8833', '567.9706', '572.6526', '599.4034', '655.5579', '673.7376',
+        '703.2018', '741.4414', '805.8574', '829.5424', '836.9544', '875.4090',
+        '889.0397', '908.2982', '933.8316', '944.8993', '995.8904', '1006.5716',
+        '1029.9973', '1092.6482', '1093.7111', '1106.3295', '1119.0839', '1147.1656',
+        '1153.6500', '1165.1235', '1169.9776', '1171.6072', '1188.3366', '1216.3867',
+        '1226.9051', '1253.1221', '1271.8754', '1296.3278', '1357.1452', '1369.0724',
+        '1392.7282', '1406.5535', '1419.6862', '1446.3427', '1452.7451', '1458.9739',
+        '1500.3573', '1509.5064', '1549.8574', '1579.1960', '1597.0503', '1603.9517',
+        '1618.5829', '1631.3418', '1636.5279', '1645.5873', '1651.2391', '1658.8773',
+        '1671.9116', '1682.3570', '1745.3707', '1784.1004', '1822.3883', '3127.0369',
+        '3136.1681', '3215.2533', '3219.2813', '3230.7019', '3237.3553', '3245.7867',
+        '3270.9525', '3277.8953', '3295.7129', '3365.9581', '3385.8351', '3416.0938',
+        '3434.9811', '3923.6069', '4084.5121', '4090.6257'
+        ]
+    ]
+    # fmt: on
+
+    # Comment/uncomment to perform new geom/freq calculation
+    freqs = []
+    main(freqs)
