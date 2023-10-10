@@ -1,9 +1,7 @@
 import os
 import sys
 
-sys.path.append(
-    f"{os.environ['PSI4']}/lib/python3.10/site-packages"
-)
+sys.path.append(f"{os.environ['PSI4']}/lib/python3.10/site-packages")
 import psi4
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -11,6 +9,11 @@ import sounddevice as sd
 import numpy as np
 import threading
 import soundfile as sf
+import matplotlib.pyplot as plt
+
+DURATION = 60  # seconds
+SAMPLE_RATE = 60000  # Hz
+DO_PLOT = True
 
 
 def compute_geom_from_smiles(smiles):
@@ -59,8 +62,12 @@ def compute_freqs(basis, mol):
     # Get optimized geometry
 
 
-def add_tone(signal, frequency, duration=10.0, amplitude=0.5, sample_rate=44100):
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+def get_time_series():
+    return np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
+
+
+def add_tone(signal, frequency, amplitude=0.5):
+    t = get_time_series()
     s = amplitude * np.sin(2 * np.pi * frequency * t)
     if signal.size > 0:
         signal += s
@@ -69,19 +76,19 @@ def add_tone(signal, frequency, duration=10.0, amplitude=0.5, sample_rate=44100)
     return signal
 
 
-def play_sound(signal, sample_rate=44100):
-    sd.play(signal, samplerate=sample_rate)
+def play_sound(signal):
+    sd.play(signal)
     sd.wait()
 
 
-def save_sound(file, signal, sample_rate=44100):
-    sf.write(file, signal, sample_rate, subtype="FLOAT")
+def save_sound(file, signal):
+    sf.write(file, signal, SAMPLE_RATE, subtype="FLOAT")
 
 
-def play_tone(frequency, duration=10.0, amplitude=0.5, sample_rate=44100):
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+def play_tone(frequency, amplitude=0.5):
+    t = get_time_series()
     signal = amplitude * np.sin(2 * np.pi * frequency * t)
-    sd.play(signal, samplerate=sample_rate)
+    sd.play(signal, samplerate=SAMPLE_RATE)
     sd.wait()
 
 
@@ -96,9 +103,10 @@ def play_freqs(freqs):
 
 
 def compute_sound(freqs):
+    freqs *= 0.1  # scale all into lower freqs, cause it sounds cooler in that bass
     sound = np.array([])
     for freq in freqs:
-        sound = add_tone(sound, freq, amplitude=10.0 / freq)
+        sound = add_tone(sound, freq)
     return sound
 
 
@@ -128,8 +136,13 @@ def main(freqs):
         mol = optimize_geom(basis, mol)
         freqs = compute_freqs(basis, mol)
 
-    sound = compute_sound(freqs)
+    sound = compute_sound(np.array(freqs))
+    if DO_PLOT:
+        t = get_time_series()
+        plt.plot(t, sound)
+        plt.show()
     play_sound(sound)
+    save_sound("mol.wav", sound)
 
 
 if __name__ == "__main__":
@@ -159,6 +172,6 @@ if __name__ == "__main__":
     ]
     # fmt: on
 
-    # Comment/uncomment to perform new geom/freq calculation
+    # Comment/uncomment to perform new geom/freq calculation, otherwise freqs above will be used.
     freqs = []
     main(freqs)
