@@ -26,8 +26,6 @@ def compute_geom_from_smiles(smiles):
     print("Molecule starting geometry:")
     print(xyz)
 
-    psi4.set_num_threads(10)
-    # psi4.set_options({'temperature': 300}) # Degrees K
     mol = psi4.geometry(xyz)
     return mol
 
@@ -111,6 +109,7 @@ def compute_sound(freqs):
 
 
 def main(freqs):
+    psi4.set_num_threads(10)
     psi4.set_options({"reference": "rhf"})
 
     # Compute new optimized geometry and normal mode freqs
