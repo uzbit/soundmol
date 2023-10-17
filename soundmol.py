@@ -11,7 +11,7 @@ import threading
 import soundfile as sf
 import matplotlib.pyplot as plt
 
-DURATION = 10  # seconds
+DURATION = 60  # seconds
 SAMPLE_RATE = 60000  # Hz
 DO_PLOT = True
 
